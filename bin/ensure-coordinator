@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# agent-coherence plugin: SessionStart hook
+# Ensures the local coordinator is running for this workspace.
+#
+# Behavior:
+#   - If COHERENCE_PORT is already set (inherited from $CLAUDE_ENV_FILE), validate it's a
+#     decimal integer and exit 0.
+#   - Otherwise, invoke the `agent-coherence-coordinator` console script from the
+#     pip-installed `agent-coherence` library, which handles fcntl-locked lazy spawn,
+#     port-file write fence, idle-shutdown, and SQLite-WAL rehydration.
+#
+# Errors degrade gracefully: a missing library → no coordinator → hook handlers proceed
+# silently per v0.1 warn-mode best-effort stance.
+
+set -uo pipefail
+
+# Validate inherited COHERENCE_PORT if set (defense against env-var injection)
+if [ -n "${COHERENCE_PORT:-}" ]; then
+  if ! [[ "$COHERENCE_PORT" =~ ^[0-9]+$ ]]; then
+    echo "agent-coherence: rejecting non-numeric COHERENCE_PORT=$COHERENCE_PORT" >&2
+    exit 1
+  fi
+  # Already initialized in this session
+  exit 0
+fi
+
+# Locate the coordinator console script (installed by `pip install agent-coherence`)
+if ! command -v agent-coherence-coordinator >/dev/null 2>&1; then
+  echo "agent-coherence: coordinator console script not on PATH; install via 'pip install agent-coherence' to enable coherence detection. Hooks will no-op silently." >&2
+  exit 0
+fi
+
+# Spawn or attach. The Python script handles all the lifecycle race-safety and writes
+# `export COHERENCE_PORT=<port>` to $CLAUDE_ENV_FILE so subsequent hooks have the port.
+exec agent-coherence-coordinator

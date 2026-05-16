@@ -1,0 +1,33 @@
+# OS / editor noise
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# Coordinator runtime state — NEVER commit (KTD-13 defense-in-depth)
+.coherence/
+
+# Test / harness artifacts — NEVER commit (Unit 9 transcript scrubbing)
+*.stream.jsonl
+*.transcript.json
+/tmp-test/
+
+# Node toolchain (v0.1.1 Node MESI-subset coordinator will land here)
+node_modules/
+*.log
+npm-debug.log*
+dist/
+build/
+
+# Python toolchain (for local dev / scripts only — coordinator is installed via pip from the library)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Claude Code session state
+.claude/
+
+# Local-only docs (per agent-coherence convention)
+docs/local/
+*.local.md
