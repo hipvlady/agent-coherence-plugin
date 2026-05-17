@@ -1,13 +1,13 @@
 {
+  "_comment": "Probe 2B fallback — command-type hooks that bypass $COHERENCE_PORT env propagation entirely. Each hook invokes the agent-coherence-hook-client console script which reads <workspace>/.coherence/server.pid for the port and hook.secret for the Bearer token, then makes the HTTP POST. Use only if Phase E.0 probe 2A demonstrates $CLAUDE_ENV_FILE propagation is unreliable on the target claude version. See docs/probes/2026-05-17-phase-e0-probe-procedure.md.",
   "hooks": {
     "PreToolUse": [
       {
         "matcher": "Read",
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:${COHERENCE_PORT}/hooks/pre-read",
-            "timeout": 5
+            "type": "command",
+            "command": "agent-coherence-hook-client pre-read"
           }
         ]
       },
@@ -15,9 +15,8 @@
         "matcher": "Edit|Write",
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:${COHERENCE_PORT}/hooks/pre-edit",
-            "timeout": 5
+            "type": "command",
+            "command": "agent-coherence-hook-client pre-edit"
           }
         ]
       }
@@ -27,9 +26,8 @@
         "matcher": "Edit|Write",
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:${COHERENCE_PORT}/hooks/post-edit",
-            "timeout": 5
+            "type": "command",
+            "command": "agent-coherence-hook-client post-edit"
           }
         ]
       }
@@ -48,9 +46,8 @@
       {
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:${COHERENCE_PORT}/hooks/session-stop",
-            "timeout": 5
+            "type": "command",
+            "command": "agent-coherence-hook-client session-stop"
           }
         ]
       }

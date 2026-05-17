@@ -1,6 +1,14 @@
 # Phase E.0 probe procedure — `claude agents` + `COHERENCE_PORT` propagation
 
-**Status**: probe artifacts ready, awaiting interactive `claude` CLI execution.
+**Status**: **Both probes executed against claude v2.1.131 on 2026-05-17.**
+Results section at the bottom. TL;DR:
+
+- **Probe 2A (HTTP-type hooks): HARD FAIL** at hooks.json load-time URL validation.
+- **Probe 2B (command-type hooks): PASS** — `agent-coherence-hook-client` built and wired in.
+- **Probe 1 (subagent via Task tool): PASS** — hooks fire under the parent's session_id.
+- **Unit 7 decision**: ship command-type hooks (`hooks-command.json` becomes `hooks.json`).
+- **README claim**: "Agent View, multi-terminal, and Task-tool subagents" (no `claude agents`
+  subcommand promise on v2.1.131 — its subcommand is a manager UI, not a spawner).
 
 **What this answers**:
 - **Probe 1** — Do PreToolUse hooks fire on `claude agents` background sessions
@@ -198,3 +206,121 @@ After running both probes, paste:
 
 I'll fold the outcome into Unit 7's `hooks.json` shape decision and
 the README's coverage claim before any Unit 7 implementation lands.
+
+---
+
+## Results (2026-05-17, claude v2.1.131)
+
+### Probe 2A: HTTP-type hooks with `${COHERENCE_PORT}` — HARD FAIL
+
+`hooks.json` (the HTTP variant from this commit) was rejected at LOAD TIME
+with `plugin_errors: [{"type": "hook-load-failed", ...}]`. Specifically,
+Claude Code's hooks.json schema validator runs strict URL parsing BEFORE
+env-var expansion:
+
+```json
+{
+  "code": "invalid_format",
+  "format": "url",
+  "path": ["hooks","PreToolUse",0,"hooks",0,"url"],
+  "message": "Invalid URL"
+}
+```
+
+— repeated for PreToolUse/0, PreToolUse/1, PostToolUse/0, Stop/0.
+
+This is not a `$CLAUDE_ENV_FILE` propagation issue — it's a fundamental
+constraint of v2.1.131's hooks.json schema. HTTP-type hooks with templated
+URLs are not viable. Time wasted debugging env propagation: 0 (the probe
+surfaced the actual blocker immediately).
+
+### Probe 2B: command-type hooks via `agent-coherence-hook-client` — PASS
+
+After building `agent-coherence-hook-client` (~30 min, library commit) and
+swapping `hooks/hooks-command.json` into `hooks/hooks.json`, the plugin
+loaded cleanly (no `plugin_errors`). Running:
+
+```
+claude --plugin-dir $PLUGIN --include-hook-events --output-format stream-json \
+       --print --model haiku "Read docs/specs/test.md and respond with content"
+```
+
+produced these hook responses (filtered from stream-json):
+
+```
+PreToolUse:Read → {"status": "fresh"}   ← our hook-client response
+Stop            → {"ok": true, "released_artifacts": []}
+```
+
+And `agent-coherence-status` after the session showed:
+
+```
+Observed artifacts:
+  path                version
+  ------------------  -------
+  docs/specs/test.md        1
+
+Sessions:
+  90b1dfd3  claude-session-e1c06ce1-e05b-4a6a-9096-f05dde84f6ac
+    docs/specs/test.md  SHARED
+```
+
+End-to-end: command-type hook → hook-client stdin parse → port + secret read
+from `.coherence/` → POST to coordinator → MESI state set → status sees it.
+
+### Probe 1: subagent via Task tool — PASS (with critical nuance)
+
+`claude agents` subcommand on v2.1.131 is a manager UI, not a spawner (only
+`--setting-sources` flag available; no spawn / list / kill / attach). To
+test the user-relevant case, the probe used the Task tool to delegate to an
+Explore subagent inside a regular session.
+
+Outcome:
+
+```
+Agent  (parent)  parent_tool_use_id=None
+Read   (sub)     parent_tool_use_id=toolu_01Y9LKSjQPnENzH6FMQtzzh8
+```
+
+Both the parent's Agent tool call AND the subagent's Read tool call carry
+the same `session_id: 3c14a52f-...`. The subagent's hooks fire under the
+parent's session_id.
+
+**Implication**: this is GOOD for phpmac's failure mode. When the subagent
+reads a stale CLAUDE.md, our coordinator's stale-read warning fires for the
+parent's session — exactly the surfacing we want. The downside (no
+per-subagent MESI state isolation) is a v0.2+ concern at most.
+
+### Unit 7 / README impact
+
+| Decision | Outcome |
+|---|---|
+| `hooks.json` shape | **command-type** (`agent-coherence-hook-client` invocations) |
+| New library deliverable | `agent-coherence-hook-client` console script (landed) |
+| `bin/ensure-coordinator` env-file write | Still needed for v2.1.138+ if it supports HTTP-type with templated URLs (unverified); kept as belt-and-suspenders |
+| README coverage claim | "Agent View, multi-terminal, and Task-tool subagents" |
+| `claude agents` (subcommand) mention | OMIT — v2.1.131 doesn't expose a spawner via subcommand |
+
+### What surprised me
+
+1. **CC's hooks.json URL validator runs before env-var expansion.** The
+   plan and brainstorm both implied URL templating would work. Probe 2A's
+   immediate hard fail at load time was unambiguous — no env-propagation
+   ambiguity to debug. Worth flagging in any future plugin design doc.
+
+2. **The plugin load-failure mode is `plugin_errors[]` in `init` event,
+   not a stdout/stderr message.** Without `--output-format stream-json`,
+   the failure is invisible — claude just runs normally and the user has
+   no idea their plugin failed to load. Phase 0 buildability probes
+   should ALWAYS include the stream-json flag for any plugin work.
+
+3. **The `claude agents` subcommand on v2.1.131 has no spawner.** Prior
+   memory flagged this as `UNTESTED`; now confirmed it's a management UI
+   only. Spawning is via `--agent` flag or Task tool. Marketplace copy
+   should not reference the `claude agents` subcommand as a coverage area
+   on this version.
+
+4. **Subagent hooks under parent's session_id**: design implication is
+   beneficial (warnings surface to the parent), but worth documenting so
+   v0.2 strict mode design doesn't accidentally assume per-subagent state
+   isolation.
