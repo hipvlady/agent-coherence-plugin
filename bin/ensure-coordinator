@@ -30,6 +30,31 @@ if ! command -v agent-coherence-coordinator >/dev/null 2>&1; then
   exit 0
 fi
 
-# Spawn or attach. The Python script handles all the lifecycle race-safety and writes
-# `export COHERENCE_PORT=<port>` to $CLAUDE_ENV_FILE so subsequent hooks have the port.
-exec agent-coherence-coordinator
+# Spawn or attach. The Python script handles fcntl-locked lazy spawn + race-safety;
+# it prints `port=<N>` to stdout but does NOT write $CLAUDE_ENV_FILE — that's this
+# shim's job (Claude Code's env-propagation mechanism is shell-driven, not Python).
+port_line=$(agent-coherence-coordinator)
+status=$?
+if [ "$status" -ne 0 ]; then
+  exit "$status"
+fi
+
+# Parse and validate the port from `port=<N>` output.
+port="${port_line#port=}"
+if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+  echo "agent-coherence: coordinator returned unexpected output: $port_line" >&2
+  exit 1
+fi
+
+# Write COHERENCE_PORT to the env file so subsequent PreToolUse/PostToolUse/Stop
+# hooks see it (their hooks.json URLs use ${COHERENCE_PORT} expansion). The env
+# file is the documented Claude Code mechanism for cross-hook env propagation.
+# If $CLAUDE_ENV_FILE is unset (older claude versions, or non-plugin invocation),
+# the chain is broken and the user falls back to hooks-command.json — see
+# docs/probes/2026-05-17-phase-e0-probe-procedure.md.
+if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+  echo "export COHERENCE_PORT=$port" >> "$CLAUDE_ENV_FILE"
+fi
+
+# Also print to stdout for debug / standalone-shim verification.
+echo "$port_line"
