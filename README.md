@@ -74,9 +74,11 @@ A lazy-spawned local HTTP coordinator at the parent repo root (`<repo>/.coherenc
 
 | Slash command | Description |
 |---|---|
-| `/agent-coherence status` | Show tracked artifacts, current versions, sessions × MESI state |
-| `/agent-coherence track <path>` | Add a path to the coordinator's tracked set |
-| `/agent-coherence untrack <path>` | Remove a path from coordination |
+| `/agent-coherence:status` | Show tracked artifacts, current versions, sessions × MESI state |
+| `/agent-coherence:track <path>` | Add a path to the coordinator's tracked set |
+| `/agent-coherence:untrack <path>` | Remove a path from coordination |
+
+Slash commands shell out to the corresponding `agent-coherence-{status,track,untrack}` console scripts the library installs. If you prefer plain shell, calling the CLI directly works identically (and is also what `bin/ensure-coordinator` uses internally).
 
 ## Configuration
 
