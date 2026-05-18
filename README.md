@@ -26,10 +26,9 @@ v0.1 is an **alpha**. ~10 hand-picked installers from discovery calls and ecosys
 
 ```bash
 # Step 1 — install the Python library that provides the coordinator + hook client.
-# For v0.1 alpha, install from the feature branch directly — the PyPI release
-# (agent-coherence ≥ 0.8.0a1) lands AFTER alpha installer feedback validates
-# the plugin entry points. Until then, install from git:
-pip install "git+https://github.com/hipvlady/agent-coherence.git@feat/claude-code-plugin-v0.1"
+# The plugin entry points ship in agent-coherence ≥ 0.8.0a1 (pre-release on PyPI,
+# released 2026-05-18). The `>=0.8.0a1` specifier opts pip into the pre-release.
+pip install "agent-coherence>=0.8.0a1"
 
 # Verify the required console scripts landed on PATH
 command -v agent-coherence-coordinator
@@ -42,13 +41,12 @@ claude plugin install agent-coherence@agent-coherence
 
 After install, restart any running `claude` sessions in your workspace so the new SessionStart hook fires.
 
-> **Why git+ instead of `pip install agent-coherence`?** PyPI's current
-> `agent-coherence==0.7.1` is the LangGraph/CrewAI/AutoGen drop-in — it
-> predates this plugin and does NOT include `agent-coherence-coordinator`
-> or `agent-coherence-hook-client`. Once the v0.1 alpha cohort validates
-> the entry points, the library publishes `0.8.0a1` to PyPI and this
-> instruction collapses to `pip install agent-coherence>=0.8.0a1`. Tracking
-> in [hipvlady/agent-coherence#release-v0.8.0a1](https://github.com/hipvlady/agent-coherence/issues).
+> **Pre-release note.** `0.8.0a1` is the first PyPI release that ships
+> `agent-coherence-coordinator` and `agent-coherence-hook-client` (the
+> earlier `0.7.x` line was the LangGraph/CrewAI/AutoGen drop-in only).
+> The `>=0.8.0a1` specifier opts pip into the pre-release; a stable
+> `0.8.0` follows once the alpha cohort signs off. Release page:
+> [hipvlady/agent-coherence v0.8.0a1](https://github.com/hipvlady/agent-coherence/releases/tag/v0.8.0a1).
 
 ### Scope (v0.1)
 
