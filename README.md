@@ -10,7 +10,7 @@ Two parallel sessions can read the same `plan.md` at v1, work independently in t
 
 This plugin watches tracked artifacts (CLAUDE.md, AGENTS.md, `docs/specs/`, `docs/plans/`, `docs/brainstorms/`, `plan.md`/`task.md`/`spec.md`) across Agent View, multi-terminal sessions, and Task-tool subagents. When one session is about to act on an artifact another session has updated, the plugin injects a warning into the agent's own context via `additionalContext`. The agent reads the warning alongside the file and decides what to do — typically re-read before acting.
 
-**Coverage scope (verified against `claude` v2.1.131 on 2026-05-17 — see [Phase E.0 probe results](docs/probes/2026-05-17-phase-e0-probe-procedure.md))**:
+**Coverage scope (verified against `claude` v2.1.131 on 2026-05-17 via internal Phase E.0 probe procedure)**:
 - Agent View ✓
 - Multi-terminal (multiple `claude` processes in the same workspace) ✓
 - Task-tool subagents — subagent hooks fire under the parent's session_id, so warnings surface to the parent's context ✓
@@ -19,6 +19,8 @@ This plugin watches tracked artifacts (CLAUDE.md, AGENTS.md, `docs/specs/`, `doc
 **v0.1 ships warn-only.** Strict mode (`permissionDecision: "deny"`) is deferred to v0.2 — empirical testing showed it needs per-(session, path) retry counters and varied-reason templating to avoid model retry loops.
 
 **Validation signal**: [anthropics/claude-code#59309](https://github.com/anthropics/claude-code/issues/59309) (filed 2026-05-13) plus three documented duplicates (#40459, #19471, #29423 over 6 months) confirm the failure shape and that Anthropic isn't fixing it at the platform layer.
+
+**Launch-gate evidence (2026-05-18)**: N=40 × 2 consecutive hard-gate runs against live `claude` v2.1.131, model `haiku` — both runs scored **100%** with degenerate_rate **5% / 0%** (instrumentation gate is <10%). 35 / 33 scenarios produced the re-read warning; 3 / 7 produced acknowledgement; **zero** ignored across N=80 trials. Harness: `tests/integration/test_warn_mode_behavior_change.py` in [hipvlady/agent-coherence](https://github.com/hipvlady/agent-coherence). PR with the harness fix that made the gate reliably runnable: [#27](https://github.com/hipvlady/agent-coherence/pull/27).
 
 ## Install (v0.1 private alpha — invite-only)
 
@@ -66,7 +68,7 @@ claude --include-hook-events --output-format stream-json "your prompt"
 
 ## How it works (one paragraph)
 
-A lazy-spawned local HTTP coordinator at the parent repo root (`<repo>/.coherence/`) wraps a SQLite-WAL state store implementing the MESI cache-coherence protocol. Plugin hooks are **command-type** (not HTTP-type — Claude Code v2.1.131's hooks.json schema validator rejects URLs containing env-var templates at load time per [Phase E.0 probe 2A](docs/probes/2026-05-17-phase-e0-probe-procedure.md)); each hook invokes `agent-coherence-hook-client` which reads `.coherence/server.pid` for the port + `.coherence/hook.secret` for the bearer token, then POSTs the hook payload to the coordinator. PreToolUse fires for every `Read`, `Edit`, `Write`; PostToolUse commits writes and triggers peer invalidations; Stop releases any uncommitted EXCLUSIVE grants at end-of-turn. All HTTP traffic is `127.0.0.1`-bound. Coordinator idle-shuts after 15 minutes; SQLite state rehydrates on next spawn. See the underlying library: [agent-coherence](https://github.com/hipvlady/agent-coherence).
+A lazy-spawned local HTTP coordinator at the parent repo root (`<repo>/.coherence/`) wraps a SQLite-WAL state store implementing the MESI cache-coherence protocol. Plugin hooks are **command-type** (not HTTP-type — Claude Code v2.1.131's hooks.json schema validator rejects URLs containing env-var templates at load time, per the internal Phase E.0 probe 2A finding); each hook invokes `agent-coherence-hook-client` which reads `.coherence/server.pid` for the port + `.coherence/hook.secret` for the bearer token, then POSTs the hook payload to the coordinator. PreToolUse fires for every `Read`, `Edit`, `Write`; PostToolUse commits writes and triggers peer invalidations; Stop releases any uncommitted EXCLUSIVE grants at end-of-turn. All HTTP traffic is `127.0.0.1`-bound. Coordinator idle-shuts after 15 minutes; SQLite state rehydrates on next spawn. See the underlying library: [agent-coherence](https://github.com/hipvlady/agent-coherence).
 
 ## Commands
 
@@ -113,11 +115,11 @@ The coordinator creates `.coherence/` at your repo root automatically. Inside it
 
 | Issue | Impact | When it matters |
 |---|---|---|
-| [Watchdog races](docs/known-issues/2026-05-17-watchdog-races.md) (A6, A7) | Stale reads can be silently suppressed under sustained concurrent load | Shared CI runners, stress tests, >10 parallel sessions. Not normal single-developer use. v0.1.1 design pass will close. |
-| [Lifecycle hardening deferrals](docs/known-issues/2026-05-17-lifecycle-deferred-hardening.md) (L1-L5) | Edge cases around `rm -rf .coherence/`, in-flight handler truncation, 30-process thundering herd, idle-shutdown stop semantics | Operational rare cases (CI fleets, manual `.coherence/` cleanup mid-session). Default single-developer interactive use unaffected. |
+| [Watchdog races (A6, A7)](https://github.com/hipvlady/agent-coherence-plugin/issues/1) | Stale reads can be silently suppressed under sustained concurrent load | Shared CI runners, stress tests, >10 parallel sessions. Not normal single-developer use. v0.1.1 design pass will close. |
+| [Lifecycle hardening deferrals (L1–L5)](https://github.com/hipvlady/agent-coherence-plugin/issues/2) | Edge cases around `rm -rf .coherence/`, in-flight handler truncation, 30-process thundering herd, idle-shutdown stop semantics | Operational rare cases (CI fleets, manual `.coherence/` cleanup mid-session). Default single-developer interactive use unaffected. |
 | Native Windows not supported | `fcntl` lock primitive is POSIX-only | Use WSL2 on Windows. v0.2 ships an `os.O_EXCL` fallback. |
 | Strict mode (`permissionDecision: "deny"`) deferred to v0.2 | v0.1 warns but never blocks | Hard guardrails for "agent MUST re-read before edit" not available yet. Empirical retry-loop hazard on v2.1.131 forced this deferral. |
-| HTTP-type hooks not viable on v2.1.131 ([Phase E.0 probe 2A](docs/probes/2026-05-17-phase-e0-probe-procedure.md)) | hooks.json URL templating fails strict-URL schema validation at load time | v0.1 ships command-type hooks via `agent-coherence-hook-client` — works on v2.1.131. If a future CC version supports URL templating, an HTTP-type variant can be added as a perf optimization. |
+| HTTP-type hooks not viable on v2.1.131 (internal Phase E.0 probe 2A) | hooks.json URL templating fails strict-URL schema validation at load time | v0.1 ships command-type hooks via `agent-coherence-hook-client` — works on v2.1.131. If a future CC version supports URL templating, an HTTP-type variant can be added as a perf optimization. |
 | `claude agents` subcommand not in coverage scope | The v2.1.131 subcommand is a management UI, not a session spawner; no PreToolUse hooks to capture | Use Agent View, multi-terminal, or Task-tool subagents (all in scope). If a future CC version exposes a session spawner via `claude agents`, file an issue and we'll re-probe coverage. |
 
 ## License
