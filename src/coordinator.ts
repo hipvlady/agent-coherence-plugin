@@ -25,6 +25,7 @@ import { hostname } from "node:os";
 import { ensureSecret } from "./auth.js";
 import { createServer, BIND_HOST } from "./server.js";
 import { ArtifactRegistry } from "./registry.js";
+import { TrackedArtifactPolicy } from "./policy.js";
 
 const VERSION = "0.1.1-alpha.1";
 
@@ -87,11 +88,21 @@ async function main(): Promise<void> {
       `migrations_applied=${registry.getStats().migrationsApplied})`,
   );
 
+  const policy = TrackedArtifactPolicy.load(workspace.root);
+  const policySummary = policy.summary();
+  logInfo(
+    `policy loaded (defaults=${policySummary.default_pattern_count}, ` +
+      `user_added=${policySummary.user_added_pattern_count}, ` +
+      `ignored=${policySummary.ignored_pattern_count}, ` +
+      `rejected=${policySummary.rejected_pattern_count})`,
+  );
+
   const server = createServer({
     secret,
     startedAtMs,
     version: VERSION,
     registry,
+    policy,
   });
 
   // Bind to ephemeral port on loopback. Per KTD-A.5 + Open Questions:
