@@ -24,6 +24,9 @@ import type { ArtifactRegistry } from "./registry.js";
 import type { TrackedArtifactPolicy, PolicySummary } from "./policy.js";
 import type { SessionRegistry } from "./sessions.js";
 import { preReadRoute } from "./hooks/pre_read.js";
+import { preEditRoute } from "./hooks/pre_edit.js";
+import { postEditRoute } from "./hooks/post_edit.js";
+import { sessionStopRoute } from "./hooks/session_stop.js";
 
 /** R21: per KTD-B.2 security-parity corpus + v0.1.1 plan KTD-K. */
 export const MAX_REQUEST_BODY_BYTES = 64 * 1024;
@@ -248,12 +251,25 @@ export function createServer(options: ServerOptions): Server {
         handleStatus(req, res, options);
         return;
       }
+      const hookDeps = {
+        registry: options.registry,
+        policy: options.policy,
+        sessions: options.sessions,
+      };
       if (path === "/hooks/pre-read") {
-        preReadRoute(req, res, {
-          registry: options.registry,
-          policy: options.policy,
-          sessions: options.sessions,
-        }, MAX_REQUEST_BODY_BYTES).catch(handle500);
+        preReadRoute(req, res, hookDeps, MAX_REQUEST_BODY_BYTES).catch(handle500);
+        return;
+      }
+      if (path === "/hooks/pre-edit") {
+        preEditRoute(req, res, hookDeps, MAX_REQUEST_BODY_BYTES).catch(handle500);
+        return;
+      }
+      if (path === "/hooks/post-edit") {
+        postEditRoute(req, res, hookDeps, MAX_REQUEST_BODY_BYTES).catch(handle500);
+        return;
+      }
+      if (path === "/hooks/session-stop") {
+        sessionStopRoute(req, res, hookDeps, MAX_REQUEST_BODY_BYTES).catch(handle500);
         return;
       }
       writeError(res, 404, "not found");
