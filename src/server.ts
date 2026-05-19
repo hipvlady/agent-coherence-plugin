@@ -20,6 +20,7 @@
  */
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { verifyBearer, verifyHost } from "./auth.js";
+import type { ArtifactRegistry } from "./registry.js";
 
 /** R21: per KTD-B.2 security-parity corpus + v0.1.1 plan KTD-K. */
 export const MAX_REQUEST_BODY_BYTES = 64 * 1024;
@@ -30,10 +31,12 @@ export const BIND_HOST = "127.0.0.1";
 export interface ServerOptions {
   /** Bearer secret returned by ensureSecret(); used for verifyBearer auth. */
   secret: string;
-  /** Coordinator-process startup timestamp (epoch ms); surfaces in /health. */
+  /** Coordinator-process startup timestamp (epoch ms); surfaces in /health + /status. */
   startedAtMs: number;
-  /** Coordinator-process semver; surfaces in /health for version-skew diagnostics. */
+  /** Coordinator-process semver; surfaces in /health + /status for version-skew diagnostics. */
   version: string;
+  /** SQLite registry handle; surfaces stats in /status default tier. */
+  registry: ArtifactRegistry;
 }
 
 interface ErrorEnvelope {
@@ -101,16 +104,117 @@ function handleHealth(req: IncomingMessage, res: ServerResponse, options: Server
   writeJson(res, 200, body);
 }
 
+/**
+ * /status three-tier disclosure model per KTD-K.
+ *
+ * - **Default (minimal)**: Bearer-auth only. UUID5 agent_id ONLY (strip
+ *   `claude-session-` prefix so operators can't accidentally cross-reference
+ *   CC transcript history); repo-relative paths; counts and aggregates.
+ *   Lower-leakage tier for default operator queries.
+ * - **`?detail=metrics`**: Bearer-auth only. KTD-J counters only; NO paths,
+ *   NO session identifiers. Safe-to-share tier for GitHub bug reports.
+ *   README routes users here for issue templates.
+ * - **`?detail=full`**: Bearer + `Coherence-Local-Operator: true` header
+ *   (misuse boundary — same-secret holder CAN set it trivially; the header
+ *   prevents accidental paste-into-issue leakage, not malicious disclosure).
+ *   Unmasks raw session_id (full agent_name), absolute paths, coordinator_pid.
+ *   DEFERRED TO UNIT 8 — Unit 1 returns 501 Not Implemented for this tier.
+ *
+ * v0.1.1 Unit 1 ships default + metrics tiers with placeholder bodies
+ * (empty arrays + zero counters). Unit 2 fills tracked_artifacts + sessions
+ * with real registry data. Unit 8 lands ?detail=full + KTD-J counter values.
+ */
+
+type StatusDetail = "default" | "metrics" | "full";
+
+interface StatusDefaultBody {
+  status: "ok";
+  backend: "node";
+  version: string;
+  coordinator_uptime_seconds: number;
+  schema_version: number;
+  tracked_artifacts: ReadonlyArray<unknown>; // Filled in Unit 2 with {id, name, version}
+  sessions: ReadonlyArray<unknown>; // Filled in Unit 2 with {agent_id (UUID5 only), backend_owned}
+  counts: {
+    tracked_artifacts: number;
+    sessions: number;
+  };
+}
+
+interface StatusMetricsBody {
+  backend: "node";
+  version: string;
+  counters: Record<string, number>;
+}
+
+function parseDetailParam(rawUrl: string): StatusDetail {
+  // Use a fixed base because IncomingMessage.url is a path+query, not an absolute URL.
+  const url = new URL(rawUrl, "http://localhost");
+  const detail = url.searchParams.get("detail");
+  if (detail === "metrics") return "metrics";
+  if (detail === "full") return "full";
+  return "default";
+}
+
+function handleStatus(req: IncomingMessage, res: ServerResponse, options: ServerOptions): void {
+  if (req.method !== "GET") {
+    writeError(res, 404, "not found");
+    return;
+  }
+  const detail = parseDetailParam(req.url ?? "/status");
+
+  if (detail === "full") {
+    // Unit 8 lands the operator opt-in header check + unmasked body.
+    writeError(res, 501, "detail=full not implemented in v0.1.1 unit 1");
+    return;
+  }
+
+  const uptimeSeconds = Math.floor((Date.now() - options.startedAtMs) / 1000);
+  const schemaVersion = options.registry.getStats().schemaVersion;
+
+  if (detail === "metrics") {
+    const body: StatusMetricsBody = {
+      backend: "node",
+      version: options.version,
+      // KTD-J counters land in Unit 8. Empty placeholder keeps the shape stable
+      // so consumers can parse the body even before counters are wired.
+      counters: {},
+    };
+    writeJson(res, 200, body);
+    return;
+  }
+
+  // Default tier.
+  const body: StatusDefaultBody = {
+    status: "ok",
+    backend: "node",
+    version: options.version,
+    coordinator_uptime_seconds: uptimeSeconds,
+    schema_version: schemaVersion,
+    tracked_artifacts: [], // Unit 2 fills with repo-relative paths + UUID5 ids
+    sessions: [], // Unit 2 fills with UUID5 agent_ids (stripped of claude-session- prefix per KTD-K)
+    counts: {
+      tracked_artifacts: 0,
+      sessions: 0,
+    },
+  };
+  writeJson(res, 200, body);
+}
+
 export function createServer(options: ServerOptions): Server {
   const server = createHttpServer((req, res) => {
     try {
       if (!checkAuth(req, res, options.secret)) {
         return;
       }
-      // Route dispatch. v0.1.1 Unit 1 lands /health only; /status + hook
-      // endpoints land in subsequent commits.
-      if (req.url === "/health") {
+      // Route dispatch on path only (query string handled per-route).
+      const path = (req.url ?? "/").split("?")[0];
+      if (path === "/health") {
         handleHealth(req, res, options);
+        return;
+      }
+      if (path === "/status") {
+        handleStatus(req, res, options);
         return;
       }
       writeError(res, 404, "not found");

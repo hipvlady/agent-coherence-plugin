@@ -24,6 +24,7 @@ import { join, resolve } from "node:path";
 import { hostname } from "node:os";
 import { ensureSecret } from "./auth.js";
 import { createServer, BIND_HOST } from "./server.js";
+import { ArtifactRegistry } from "./registry.js";
 
 const VERSION = "0.1.1-alpha.1";
 
@@ -32,6 +33,7 @@ interface Workspace {
   coherenceDir: string;
   pidFile: string;
   portFile: string;
+  databasePath: string;
 }
 
 function resolveWorkspace(): Workspace {
@@ -42,6 +44,7 @@ function resolveWorkspace(): Workspace {
     coherenceDir,
     pidFile: join(coherenceDir, "server.pid"),
     portFile: join(coherenceDir, "server.port"),
+    databasePath: join(coherenceDir, "state.db"),
   };
 }
 
@@ -74,10 +77,21 @@ async function main(): Promise<void> {
   mkdirSync(workspace.coherenceDir, { recursive: true, mode: 0o700 });
   const secret = ensureSecret(workspace.coherenceDir);
 
+  // Open the SQLite registry. Unit 1 ships with an empty MIGRATIONS list so
+  // this is just an open-WAL-and-close lifecycle wired into shutdown; Unit 2
+  // appends real migrations and exposes MESI methods on the registry.
+  const registry = new ArtifactRegistry(workspace.databasePath);
+  logInfo(
+    `registry opened at ${workspace.databasePath} ` +
+      `(schema_version=${registry.getStats().schemaVersion}, ` +
+      `migrations_applied=${registry.getStats().migrationsApplied})`,
+  );
+
   const server = createServer({
     secret,
     startedAtMs,
     version: VERSION,
+    registry,
   });
 
   // Bind to ephemeral port on loopback. Per KTD-A.5 + Open Questions:
@@ -117,6 +131,11 @@ async function main(): Promise<void> {
       }
     }
     server.close((closeErr) => {
+      try {
+        registry.close();
+      } catch (err) {
+        logInfo(`registry.close error: ${String(err)}`);
+      }
       if (closeErr !== undefined) {
         logInfo(`server.close error: ${String(closeErr)}`);
         process.exit(1);
