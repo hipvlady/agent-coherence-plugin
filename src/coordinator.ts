@@ -26,6 +26,7 @@ import { ensureSecret } from "./auth.js";
 import { createServer, BIND_HOST } from "./server.js";
 import { ArtifactRegistry } from "./registry.js";
 import { TrackedArtifactPolicy } from "./policy.js";
+import { SessionRegistry } from "./sessions.js";
 
 const VERSION = "0.1.1-alpha.1";
 
@@ -97,12 +98,15 @@ async function main(): Promise<void> {
       `rejected=${policySummary.rejected_pattern_count})`,
   );
 
+  const sessions = new SessionRegistry();
+
   const server = createServer({
     secret,
     startedAtMs,
     version: VERSION,
     registry,
     policy,
+    sessions,
   });
 
   // Bind to ephemeral port on loopback. Per KTD-A.5 + Open Questions:
