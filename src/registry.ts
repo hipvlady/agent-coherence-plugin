@@ -422,6 +422,69 @@ export class ArtifactRegistry {
   }
 
   /**
+   * Transition an agent to SHARED on a tracked artifact. Used by pre-read
+   * hooks (first-observation seeding + post-stale re-grant). Mirrors Python
+   * `CoordinatorService` indirectly: Python flows through `set_agent_state`
+   * with `MESIState.SHARED`; here we expose a thin wrapper for the hook
+   * handler's clarity.
+   *
+   * Idempotent on already-SHARED state. Transitions from MODIFIED or
+   * EXCLUSIVE to SHARED are valid per MESI semantics (writer downgrades
+   * to reader). Throws on a non-valid transition.
+   */
+  grantShared(artifactId: string, agentId: string, nowTick: number, _trigger = "grant_shared"): void {
+    if (!this.hasArtifact(artifactId)) {
+      throw new Error(`grantShared: artifact ${artifactId} not registered`);
+    }
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const priorState = this.getAgentState(artifactId, agentId) ?? MESIState.INVALID;
+      if (priorState === MESIState.SHARED) {
+        this.db.exec("COMMIT");
+        return;
+      }
+      if (!isValidTransition(priorState, MESIState.SHARED)) {
+        throw new Error(
+          `grantShared: ${agentId} transition ${priorState}→SHARED not allowed`,
+        );
+      }
+      this.setAgentStateInternal(artifactId, agentId, priorState, MESIState.SHARED, nowTick, _trigger);
+      this.db.exec("COMMIT");
+    } catch (err) {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+        // Rollback failure non-recoverable; surface original error.
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Return (agent_id, granted_at_tick) of the current exclusive holder for an
+   * artifact, excluding `excludeAgentId`. Returns null if no M∪E holder. Used
+   * by pre-edit collision detection.
+   */
+  exclusiveHolder(
+    artifactId: string,
+    excludeAgentId: string,
+  ): { agentId: string; grantedAtTick: number | null } | null {
+    const rows = this.db
+      .prepare(
+        `SELECT agent_id, granted_at_tick FROM agent_states
+         WHERE artifact_id = ? AND state IN (?, ?) AND agent_id != ?`,
+      )
+      .all(artifactId, MESIState.MODIFIED, MESIState.EXCLUSIVE, excludeAgentId) as Array<{
+      agent_id: string;
+      granted_at_tick: number | null;
+    }>;
+    if (rows.length === 0) return null;
+    // checkSingleWriter elsewhere keeps this to at most one row.
+    const r = rows[0]!;
+    return { agentId: r.agent_id, grantedAtTick: r.granted_at_tick };
+  }
+
+  /**
    * Release an agent's grant by transitioning to INVALID. Does NOT bump
    * artifact.version — this is for Stop-hook cleanup of uncommitted grants
    * per KTD-11. Mirrors Python `CoordinatorService.invalidate`.

@@ -22,6 +22,8 @@ import { createServer as createHttpServer, type IncomingMessage, type ServerResp
 import { verifyBearer, verifyHost } from "./auth.js";
 import type { ArtifactRegistry } from "./registry.js";
 import type { TrackedArtifactPolicy, PolicySummary } from "./policy.js";
+import type { SessionRegistry } from "./sessions.js";
+import { preReadRoute } from "./hooks/pre_read.js";
 
 /** R21: per KTD-B.2 security-parity corpus + v0.1.1 plan KTD-K. */
 export const MAX_REQUEST_BODY_BYTES = 64 * 1024;
@@ -40,6 +42,8 @@ export interface ServerOptions {
   registry: ArtifactRegistry;
   /** Tracked-artifact policy; surfaces summary in /status default tier. */
   policy: TrackedArtifactPolicy;
+  /** In-memory session_id ↔ agent_id map for hook handlers. */
+  sessions: SessionRegistry;
 }
 
 interface ErrorEnvelope {
@@ -219,6 +223,17 @@ function handleStatus(req: IncomingMessage, res: ServerResponse, options: Server
 
 export function createServer(options: ServerOptions): Server {
   const server = createHttpServer((req, res) => {
+    // Top-level wrapper handles sync exceptions; async route handlers chain
+    // their own catch and forward to the same 500 envelope.
+    const handle500 = (err: unknown): void => {
+      const name = err instanceof Error ? err.constructor.name : "Unknown";
+      try {
+        writeError(res, 500, `internal: ${name}`);
+      } catch {
+        // Response already started; nothing left to do.
+      }
+    };
+
     try {
       if (!checkAuth(req, res, options.secret)) {
         return;
@@ -233,10 +248,17 @@ export function createServer(options: ServerOptions): Server {
         handleStatus(req, res, options);
         return;
       }
+      if (path === "/hooks/pre-read") {
+        preReadRoute(req, res, {
+          registry: options.registry,
+          policy: options.policy,
+          sessions: options.sessions,
+        }, MAX_REQUEST_BODY_BYTES).catch(handle500);
+        return;
+      }
       writeError(res, 404, "not found");
     } catch (err) {
-      const name = err instanceof Error ? err.constructor.name : "Unknown";
-      writeError(res, 500, `internal: ${name}`);
+      handle500(err);
     }
   });
   return server;
