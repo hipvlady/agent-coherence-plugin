@@ -21,6 +21,7 @@
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { verifyBearer, verifyHost } from "./auth.js";
 import type { ArtifactRegistry } from "./registry.js";
+import type { TrackedArtifactPolicy, PolicySummary } from "./policy.js";
 
 /** R21: per KTD-B.2 security-parity corpus + v0.1.1 plan KTD-K. */
 export const MAX_REQUEST_BODY_BYTES = 64 * 1024;
@@ -37,6 +38,8 @@ export interface ServerOptions {
   version: string;
   /** SQLite registry handle; surfaces stats in /status default tier. */
   registry: ArtifactRegistry;
+  /** Tracked-artifact policy; surfaces summary in /status default tier. */
+  policy: TrackedArtifactPolicy;
 }
 
 interface ErrorEnvelope {
@@ -133,12 +136,13 @@ interface StatusDefaultBody {
   version: string;
   coordinator_uptime_seconds: number;
   schema_version: number;
-  tracked_artifacts: ReadonlyArray<unknown>; // Filled in Unit 2 with {id, name, version}
-  sessions: ReadonlyArray<unknown>; // Filled in Unit 2 with {agent_id (UUID5 only), backend_owned}
+  tracked_artifacts: ReadonlyArray<{ id: string; name: string; version: number }>;
+  sessions: ReadonlyArray<{ agent_id: string }>;
   counts: {
     tracked_artifacts: number;
     sessions: number;
   };
+  policy_summary: PolicySummary;
 }
 
 interface StatusMetricsBody {
@@ -208,6 +212,7 @@ function handleStatus(req: IncomingMessage, res: ServerResponse, options: Server
       tracked_artifacts: artifacts.length,
       sessions: sessions.length,
     },
+    policy_summary: options.policy.summary(),
   };
   writeJson(res, 200, body);
 }
