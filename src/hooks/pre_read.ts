@@ -18,9 +18,6 @@
  * routing.
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { ArtifactRegistry } from "../registry.js";
-import type { TrackedArtifactPolicy } from "../policy.js";
-import type { SessionRegistry } from "../sessions.js";
 import { MESIState } from "../states.js";
 import {
   buildStaleResponse,
@@ -29,42 +26,22 @@ import {
   preemptionNoticeText,
   type StaleSummary,
 } from "../hook_payloads.js";
+import {
+  type HookDeps,
+  writeJson,
+  writeError,
+  readJsonBody,
+  isValidSessionId,
+  isValidPath,
+  isValidContentHashOrAbsent,
+} from "./_common.js";
 
-export interface PreReadDeps {
-  registry: ArtifactRegistry;
-  policy: TrackedArtifactPolicy;
-  sessions: SessionRegistry;
-}
+export type PreReadDeps = HookDeps;
 
 interface PreReadBody {
   session_id?: unknown;
   path?: unknown;
   content_hash?: unknown;
-}
-
-/** Returns true on valid UUID-shape (8-4-4-4-12 hex with hyphens). */
-function isValidSessionId(s: unknown): s is string {
-  return typeof s === "string" && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(s);
-}
-
-function isValidPath(p: unknown): p is string {
-  return typeof p === "string" && p.length > 0 && !p.startsWith("/") && !p.split("/").includes("..");
-}
-
-/** sha256 hex content-hash optional. If provided, must be 64-char hex. */
-function isValidContentHashOrAbsent(h: unknown): h is string | undefined | null {
-  if (h === undefined || h === null) return true;
-  return typeof h === "string" && /^[0-9a-fA-F]{64}$/.test(h);
-}
-
-function writeJson(res: ServerResponse, status: number, body: unknown): void {
-  res.statusCode = status;
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.end(JSON.stringify(body));
-}
-
-function writeError(res: ServerResponse, status: number, message: string): void {
-  writeJson(res, status, { error: message });
 }
 
 export async function handlePreRead(
@@ -203,7 +180,7 @@ function buildAdditionalNoticeText(deps: PreReadDeps, agentId: string): string |
   return preemptionNoticeText(rendered);
 }
 
-/** Parse + dispatch helper for use from server.ts. Drains body, validates JSON. */
+/** Parse + dispatch helper for use from server.ts. */
 export async function preReadRoute(
   req: IncomingMessage,
   res: ServerResponse,
@@ -214,32 +191,7 @@ export async function preReadRoute(
     writeError(res, 404, "not found");
     return;
   }
-  const chunks: Buffer[] = [];
-  let total = 0;
-  await new Promise<void>((resolve, reject) => {
-    req.on("data", (chunk: Buffer) => {
-      total += chunk.length;
-      if (total > maxBytes) {
-        // R21 — but handle the late-arrival case where the header lied.
-        reject(new Error("request body exceeded MAX_REQUEST_BODY_BYTES during read"));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", () => resolve());
-    req.on("error", (err) => reject(err));
-  });
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } catch {
-    writeError(res, 400, "invalid json");
-    return;
-  }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    writeError(res, 400, "body must be a JSON object");
-    return;
-  }
-  await handlePreRead(parsed as PreReadBody, res, deps);
+  const body = await readJsonBody(req, res, maxBytes);
+  if (body === null) return;
+  await handlePreRead(body as PreReadBody, res, deps);
 }

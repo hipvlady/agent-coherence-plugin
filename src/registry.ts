@@ -657,6 +657,24 @@ export class ArtifactRegistry {
     }
   }
 
+  /**
+   * Return artifact_ids where the given agent currently holds one of the
+   * listed MESI states. Used by /hooks/session-stop per KTD-11 to enumerate
+   * uncommitted grants that need release. Mirrors Python
+   * `sqlite_registry.artifacts_held_by_agent`.
+   */
+  artifactsHeldByAgent(agentId: string, states: ReadonlyArray<MESIState>): string[] {
+    if (states.length === 0) return [];
+    const placeholders = states.map(() => "?").join(",");
+    const rows = this.db
+      .prepare(
+        `SELECT artifact_id FROM agent_states
+         WHERE agent_id = ? AND state IN (${placeholders})`,
+      )
+      .all(agentId, ...states) as { artifact_id: string }[];
+    return rows.map((r) => r.artifact_id);
+  }
+
   /** Active sessions = agents with at least one non-INVALID grant. For /status default tier. */
   listActiveAgents(): string[] {
     const rows = this.db
