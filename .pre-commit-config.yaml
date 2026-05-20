@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: check-versions-synced
+        name: check versions synced across package.json, plugin.json, marketplace.json
+        entry: node tools/check_versions_synced.js
+        language: system
+        pass_filenames: false
+        files: '^(package\.json|\.claude-plugin/plugin\.json|\.claude-plugin/marketplace\.json)$'
