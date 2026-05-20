@@ -70,6 +70,10 @@ For visibility, run with `--include-hook-events --output-format stream-json` (de
 claude --include-hook-events --output-format stream-json "your prompt"
 ```
 
+## Branching strategy
+
+Feature work targets `dev`; release merges promote `dev → main` and tag from `main`. The canonical guidance lives in [CLAUDE.md](CLAUDE.md) at the repo root — `gh pr create` defaults to `--base dev` unless the PR is the release merge.
+
 ## How it works (one paragraph)
 
 A lazy-spawned local HTTP coordinator at the parent repo root (`<repo>/.coherence/`) wraps a SQLite-WAL state store implementing the MESI cache-coherence protocol. Plugin hooks are **command-type** (not HTTP-type — Claude Code v2.1.131's hooks.json schema validator rejects URLs containing env-var templates at load time, per the internal Phase E.0 probe 2A finding); each hook invokes `agent-coherence-hook-client` which reads `.coherence/server.pid` for the port + `.coherence/hook.secret` for the bearer token, then POSTs the hook payload to the coordinator. PreToolUse fires for every `Read`, `Edit`, `Write`; PostToolUse commits writes and triggers peer invalidations; Stop releases any uncommitted EXCLUSIVE grants at end-of-turn. All HTTP traffic is `127.0.0.1`-bound. Coordinator idle-shuts after 15 minutes; SQLite state rehydrates on next spawn. See the underlying library: [agent-coherence](https://github.com/hipvlady/agent-coherence).
@@ -97,11 +101,10 @@ The coordinator creates `.coherence/` at your repo root automatically. Inside it
 
 ## Release sequence
 
-| Version | Surface | When |
-|---|---|---|
-| **v0.1** | Private alpha. Direct install via `claude plugin install <git url>`. NO marketplace catalog listing. | 2026-05 |
-| **v0.1.1** | Marketplace catalog enabling. Node MESI-subset coordinator collapses install to one-click. Hard 4-week deadline from v0.1 ship. | 2026-06 |
-| **v0.2** | Strict mode (`permissionDecision: "deny"`) with retry counters + varied-reason templating. Polish for cohort 2 of discovery. | TBD |
+- **v0.1.1** (current) — Node MESI-subset coordinator + self-hosted marketplace catalog listing. One-click install via `/plugin marketplace add hipvlady/agent-coherence-plugin`.
+- **v0.2** (next) — strict mode (`permissions.deny` + multi-tool runtime hooks per the v0.2 Phase 0 H4 finding), native Windows, security@ alias.
+
+Per-release procedure: see [docs/RELEASE.md](docs/RELEASE.md) (operator runbook — pre-flight setup, version bump, tag push, hot-fix path).
 
 ## Troubleshooting
 
