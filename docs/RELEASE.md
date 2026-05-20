@@ -34,7 +34,9 @@ git checkout -b dev && git push -u origin dev
 
 ### Configure branch protection on `main`
 
-Require PR review + status checks (`typecheck`, `test`, `build`). Strict mode means the PR branch must be up to date with `main` before merging.
+Require PR review + the five CI status check contexts. Strict mode means the PR branch must be up to date with `main` before merging.
+
+The context names below MUST match the job display names in `.github/workflows/ci.yml` verbatim — GitHub matches on the `name:` field of each job (and per-matrix variant). Update this list if the workflow's job names change.
 
 ```bash
 gh api -X PUT repos/hipvlady/agent-coherence-plugin/branches/main/protection \
@@ -42,7 +44,7 @@ gh api -X PUT repos/hipvlady/agent-coherence-plugin/branches/main/protection \
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": ["typecheck", "test", "build"]
+    "contexts": ["Typecheck", "Tests (Node 18)", "Tests (Node 20)", "Tests (Node 22)", "Build Package"]
   },
   "enforce_admins": false,
   "required_pull_request_reviews": {
@@ -56,7 +58,7 @@ JSON
 
 ### Configure branch protection on `dev`
 
-Require status checks only. No review required — `dev` is a fast-moving integration branch.
+Require the same five status check contexts. No review required — `dev` is a fast-moving integration branch.
 
 ```bash
 gh api -X PUT repos/hipvlady/agent-coherence-plugin/branches/dev/protection \
@@ -64,7 +66,7 @@ gh api -X PUT repos/hipvlady/agent-coherence-plugin/branches/dev/protection \
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": ["typecheck", "test", "build"]
+    "contexts": ["Typecheck", "Tests (Node 18)", "Tests (Node 20)", "Tests (Node 22)", "Build Package"]
   },
   "enforce_admins": false,
   "required_pull_request_reviews": null,
@@ -110,7 +112,7 @@ Replace `X.Y.Z` with the target version (e.g. `0.1.2`) throughout.
    gh pr create --base main --head dev --title "release: vX.Y.Z"
    ```
 
-   Verify CI is green on every required job (`typecheck`, `test`, `build`) before continuing.
+   Verify CI is green on every required job (`Typecheck`, `Tests (Node 18/20/22)`, `Build Package`) before continuing.
 
 2. **Merge with rebase.** Rebase preserves the commit identity so the tag in step 7 points at the same SHA that existed on `dev`.
 
