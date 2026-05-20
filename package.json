@@ -13,7 +13,11 @@
     "watch": "tsc --watch",
     "test": "node --test dist/test/",
     "test:src": "tsc && node --test dist/test/",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "format": "prettier --write 'src/**/*.ts' 'tools/**/*.js'",
+    "format:check": "prettier --check 'src/**/*.ts' 'tools/**/*.js'"
   },
   "dependencies": {
     "@types/js-yaml": "^4.0.9",
@@ -23,8 +27,14 @@
     "uuid": "^14.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.9.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "globals": "^17.6.0",
+    "prettier": "^3.0.0",
     "typescript": "^6.0.3"
   },
   "homepage": "https://github.com/hipvlady/agent-coherence-plugin",
