@@ -1,14 +1,18 @@
 # agent-coherence (Claude Code plugin)
 
-**Status: v0.1 private alpha** (active build, started 2026-05-13). Marketplace catalog listing is held until v0.1.1 (Node MESI-subset coordinator, hard 4-week deadline from v0.1 ship). See [release sequence](#release-sequence) below.
+**Coherence for the prose subset of project rules that can't be expressed as policy.**
+
+CLAUDE.md is your project's prose contract — what to track, what to escalate, what to never touch. Most of those rules can't be expressed as `permissions.deny` or `.claude/settings.json` because they're about *state*, not *tools*: "this spec is now v3, your branch is editing v1", "the planner reorganized the auth section while you weren't looking", "session B just committed a change to the file you're about to write." `agent-coherence` is the runtime layer that makes those state changes visible across parallel Claude Code sessions sharing the same workspace.
+
+**Status: v0.1.1 alpha** (Node coordinator + marketplace catalog listing). v0.1 shipped private alpha 2026-05-18; v0.1.1 collapses the two-step install to one-click. See [release sequence](#release-sequence) below.
 
 ## What it does
 
-Surfaces stale-spec collisions across parallel Claude Code sessions sharing a workspace.
+Two parallel sessions can read the same `plan.md` at v1, work independently in their per-session worktrees, and produce PRs that reflect incompatible interpretations — because the planner already published v2. Worktrees prevent direct file collisions but not stale-spec collisions.
 
-Two parallel sessions can read the same `plan.md` at v1, work independently in their per-session worktrees, and produce PRs that reflect incompatible interpretations because the planner already published v2. Worktrees prevent direct file collisions but not stale-spec collisions.
+This plugin watches tracked artifacts (CLAUDE.md, AGENTS.md, `DECISIONS.md`, `docs/specs/`, `docs/plans/`, `docs/brainstorms/`, `plan.md`/`task.md`/`spec.md`) across Agent View, multi-terminal sessions, and Task-tool subagents. When one session is about to act on an artifact another session has updated, the plugin injects a warning into the agent's own context via `additionalContext`. The agent reads the warning alongside the file and decides what to do — typically re-read before acting.
 
-This plugin watches tracked artifacts (CLAUDE.md, AGENTS.md, `docs/specs/`, `docs/plans/`, `docs/brainstorms/`, `plan.md`/`task.md`/`spec.md`) across Agent View, multi-terminal sessions, and Task-tool subagents. When one session is about to act on an artifact another session has updated, the plugin injects a warning into the agent's own context via `additionalContext`. The agent reads the warning alongside the file and decides what to do — typically re-read before acting.
+For tool-class rules that *can* be expressed as policy ("use rg, not grep"; "never sudo"; "no python -c"), run `agent-coherence-migrate-rules` (v0.1.1) — the helper proposes `permissions.deny` entries derived from prose in CLAUDE.md. `permissions.deny` is structurally stronger than runtime hook denies: the runtime enforces it before the model can choose which tool to invoke.
 
 **Coverage scope (verified against `claude` v2.1.131 on 2026-05-17 via internal Phase E.0 probe procedure)**:
 - Agent View ✓
@@ -22,9 +26,9 @@ This plugin watches tracked artifacts (CLAUDE.md, AGENTS.md, `docs/specs/`, `doc
 
 **Launch-gate evidence (2026-05-18)**: N=40 × 2 consecutive hard-gate runs against live `claude` v2.1.131, model `haiku` — both runs scored **100%** with degenerate_rate **5% / 0%** (instrumentation gate is <10%). 35 / 33 scenarios produced the re-read warning; 3 / 7 produced acknowledgement; **zero** ignored across N=80 trials. Harness: `tests/integration/test_warn_mode_behavior_change.py` in [hipvlady/agent-coherence](https://github.com/hipvlady/agent-coherence). PR with the harness fix that made the gate reliably runnable: [#27](https://github.com/hipvlady/agent-coherence/pull/27).
 
-## Install (v0.1 private alpha — invite-only)
+## Install
 
-v0.1 is an **alpha**. ~10 hand-picked installers from discovery calls and ecosystem engagements. Two-step install for v0.1 (Python coordinator + Claude Code plugin); collapses to one-click in v0.1.1 (Node MESI-subset coordinator).
+v0.1.1 ships the Node MESI-subset coordinator and the public marketplace catalog listing. Two install paths coexist — the Python coordinator (full feature set, alpha cohort) and the Node coordinator (one-click marketplace install). Pick one via `coherence.coordinator_backend` in plugin settings; both ship the same HTTP wire contract, the same `hook.secret` exchange, and the same `server.pid` lazy-spawn semantics. Switch backends safely with `agent-coherence-coordinator --prepare-for-migration`.
 
 ```bash
 # Step 1 — install the Python library that provides the coordinator + hook client.
@@ -50,11 +54,11 @@ After install, restart any running `claude` sessions in your workspace so the ne
 > `0.8.0` follows once the alpha cohort signs off. Release page:
 > [hipvlady/agent-coherence v0.8.0a1](https://github.com/hipvlady/agent-coherence/releases/tag/v0.8.0a1).
 
-### Scope (v0.1)
+### Scope (v0.1.1)
 
 - macOS / Linux / WSL2 — native Windows deferred to v0.2 (`fcntl` constraint, see below).
-- Single workspace, single host — cross-machine and cross-vendor coverage are the hosted MCP roadmap (Path B), not this plugin.
-- Warn-only, no auto-merge, no auto-revert.
+- Single workspace, single-user, single-host workstation — not for shared developer machines, CI runners with multiple developers, or cross-host coordination. Cross-machine and cross-vendor coverage are the hosted MCP roadmap (Path B), not this plugin.
+- Warn-only, no auto-merge, no auto-revert. Tool-class rules expressible as policy use `agent-coherence-migrate-rules` (KTD-E v0.2 will combine `permissions.deny` + multi-tool runtime hooks).
 
 ### What you'll see
 
@@ -111,16 +115,26 @@ The coordinator creates `.coherence/` at your repo root automatically. Inside it
 | Coordinator process won't die | Stale `server.pid` after crash | `rm .coherence/server.pid` to clear the lock, next hook fires re-spawn |
 | `hook.secret` compromised | Same-user attack or accidental leak | Stop all sessions, `rm -rf .coherence/`, restart any Claude Code session. v0.2 will support hot rotation without restart. |
 
-## v0.1 known limitations
+## v0.1.1 known limitations
+
+Items genuinely deferred past v0.1.1. Anything not listed has been resolved on `dev` (Unit 4 / Unit 5 / Unit 6 / Unit 8 of the v0.1.1 plan).
 
 | Issue | Impact | When it matters |
 |---|---|---|
-| [Watchdog races (A6, A7)](https://github.com/hipvlady/agent-coherence-plugin/issues/1) | Stale reads can be silently suppressed under sustained concurrent load | Shared CI runners, stress tests, >10 parallel sessions. Not normal single-developer use. v0.1.1 design pass will close. |
-| [Lifecycle hardening deferrals (L1–L5)](https://github.com/hipvlady/agent-coherence-plugin/issues/2) | Edge cases around `rm -rf .coherence/`, in-flight handler truncation, 30-process thundering herd, idle-shutdown stop semantics | Operational rare cases (CI fleets, manual `.coherence/` cleanup mid-session). Default single-developer interactive use unaffected. |
 | Native Windows not supported | `fcntl` lock primitive is POSIX-only | Use WSL2 on Windows. v0.2 ships an `os.O_EXCL` fallback. |
-| Strict mode (`permissionDecision: "deny"`) deferred to v0.2 | v0.1 warns but never blocks | Hard guardrails for "agent MUST re-read before edit" not available yet. Empirical retry-loop hazard on v2.1.131 forced this deferral. |
-| HTTP-type hooks not viable on v2.1.131 (internal Phase E.0 probe 2A) | hooks.json URL templating fails strict-URL schema validation at load time | v0.1 ships command-type hooks via `agent-coherence-hook-client` — works on v2.1.131. If a future CC version supports URL templating, an HTTP-type variant can be added as a perf optimization. |
+| Strict mode (`permissionDecision: "deny"`) deferred to v0.2 | v0.1.1 warns but never blocks | Hard guardrails for "agent MUST re-read before edit" not available yet. v0.2 design combines `permissions.deny` (terminal — model cannot route around) + multi-tool runtime hooks for advisory warnings, after the v0.2 Phase 0 falsifiability experiment confirmed the H4 routing mechanism. For the tool-class subset (`grep` → `rg`, `python -c`, `sudo`), use `agent-coherence-migrate-rules` to derive `permissions.deny` entries from CLAUDE.md prose today. |
+| HTTP-type hooks not viable on v2.1.131 (internal Phase E.0 probe 2A) | hooks.json URL templating fails strict-URL schema validation at load time | v0.1.1 ships command-type hooks via `agent-coherence-hook-client` — works on v2.1.131. If a future CC version supports URL templating, an HTTP-type variant can be added as a perf optimization. |
 | `claude agents` subcommand not in coverage scope | The v2.1.131 subcommand is a management UI, not a session spawner; no PreToolUse hooks to capture | Use Agent View, multi-terminal, or Task-tool subagents (all in scope). If a future CC version exposes a session spawner via `claude agents`, file an issue and we'll re-probe coverage. |
+| Single-user, single-host workstation only | Trust boundary is the OS user; `hook.secret` mode 0600 is the load-bearing fence | Not suitable for shared developer machines, CI runners with multiple developers, or cross-host coordination. Cross-host / multi-vendor coverage is the hosted MCP roadmap (Path B), not this plugin. |
+
+### Resolved in v0.1.1
+
+- **Watchdog races (A6, A7)** — KTD-G ships queue-depth gate (HTTP 503 on overflow) + handler concurrency semaphore + observable `watchdog_timeouts_total` / `watchdog_queue_overflows_total` / `handler_concurrency_overflows_total` counters in `/status`.
+- **Lifecycle L1 — inode race on external `rm -rf`** — KTD-H inode revalidation per retry iteration in `ensure_coordinator`; bounded re-open budget defends against pathological churn.
+- **Lifecycle L2 — in-flight handler truncated on shutdown** — KTD-I in-flight semaphore drain on `coordinator.shutdown()` with bounded 5s timeout (observable HTTP 500 on overflow beats silent client hang).
+- **Multi-tool routing (H4) gap** — KTD-N extends hook coverage from `Read`/`Edit`/`Write` to `Read`/`Edit`/`Write`/`Bash`/`Grep` with file-path-aware Bash detection.
+- **Telemetry observability** — KTD-J adds per-endpoint + product-signal counters surfaced via `/status?detail=metrics` and `agent-coherence-status --detail metrics`; post-install validation via `agent-coherence-status --self-test`.
+- **Backend-switch safety** — `agent-coherence-coordinator --prepare-for-migration` atomically releases all M/E grants + shuts down before switching the Python ↔ Node backend.
 
 ## License
 
