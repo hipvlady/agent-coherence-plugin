@@ -18,15 +18,17 @@ agent-coherence
 
 ## Short tagline (≤ 100 chars)
 
-> Catches stale-spec collisions across parallel Claude Code sessions before they produce divergent PRs.
+> Coherence for the prose subset of project rules that can't be expressed as policy.
 
 ## One-paragraph description (≤ 300 chars)
 
-> Two sessions read the same plan.md at v1, then a planner publishes v2 — and your parallel agents ship incompatible PRs. agent-coherence detects this BEFORE the act, injects a warning into the agent's context, and lets the agent decide to re-read. macOS / Linux / WSL2. Warn-only in v0.1.
+> CLAUDE.md rules about *state* — "plan.md is v3 now", "session B just edited the file you're about to write" — can't be expressed as permissions.deny. agent-coherence is the runtime layer that surfaces those state changes across parallel Claude Code sessions. macOS / Linux / WSL2. Warn-only in v0.1.1.
 
 ## Long description (marketplace detail page)
 
 ### The problem
+
+CLAUDE.md is your project's prose contract — what to track, what to escalate, what to never touch. Most rules in it can't be expressed as `permissions.deny` or `.claude/settings.json` because they're about *state*, not *tools*: "this spec is now v3, your branch is editing v1", "the planner reorganized the auth section while you weren't looking", "session B just committed a change to the file you're about to write."
 
 Parallel Claude Code sessions sharing a workspace don't see each other's writes to spec files. Two sessions can both read `plan.md` at version 1, work independently in per-session git worktrees, and produce pull requests that reflect incompatible interpretations of v1 — even though the planner published v2 hours ago.
 
@@ -50,21 +52,26 @@ The agent sees:
 
 The agent decides what to do — typically re-read before acting. No platform fix needed. No model retraining.
 
-### What's in v0.1
+### What's in v0.1.1
 
 - **Coverage**: Agent View ✓, multi-terminal ✓, Task-tool subagents ✓ (verified against claude v2.1.131)
 - **Warn-only**: injects context; never blocks the user's tool call (strict mode deferred to v0.2 per empirical retry-loop hazard)
-- **Local-first**: a lazy-spawned HTTP coordinator at `<repo>/.coherence/` wraps SQLite-WAL state. No external services. No telemetry beyond what `agent-coherence-status` shows you.
-- **Race-safe**: 10-process concurrent spawn race covered by test, fcntl-locked port-file write fence, race-safe idle shutdown
-- **Auth**: shared-secret Bearer token on `127.0.0.1` with Host-header allowlist (DNS-rebind mitigation)
+- **Multi-tool routing coverage** (KTD-N): warnings fire on `Read`, `Edit`, `Write`, `Bash` (with file-path-aware command detection), and `Grep` — closes the H4 routing-around-Read gap surfaced by the v0.2 Phase 0 falsifiability experiment.
+- **Tool-class rule migration** (R19): `agent-coherence-migrate-rules` proposes `permissions.deny` entries from prose rules in CLAUDE.md ("use rg, not grep"; "never sudo"). `permissions.deny` enforces at the configuration layer — structurally stronger than runtime hook denies.
+- **Local-first**: a lazy-spawned HTTP coordinator at `<repo>/.coherence/` wraps SQLite-WAL state. Node MESI-subset coordinator ships in v0.1.1 — one-click install. No external services. No telemetry beyond what `agent-coherence-status` shows you.
+- **Race-safe**: 10-process concurrent spawn race covered by test, fcntl-locked port-file write fence, race-safe idle shutdown, KTD-H inode revalidation against external `rm -rf`, KTD-I in-flight handler drain on shutdown.
+- **Bounded under load** (KTD-G + KTD-K): per-handler 4s watchdog with queue-depth gate (HTTP 503 on overflow), handler concurrency semaphore matched to pool, SQLite `busy_timeout = 1500ms` derived from the multi-statement transaction budget.
+- **Auth**: shared-secret Bearer token on `127.0.0.1` with Host-header allowlist (DNS-rebind mitigation); R21 64 KB request body cap; R12 three-tier `/status` disclosure (default minimal — safe to paste in bug reports).
+- **Backend-switch safe**: `agent-coherence-coordinator --prepare-for-migration` atomically releases all grants + shuts down before switching the Python ↔ Node backend.
 - **Storage hygiene**: state.db has NO `content` column (KTD-13) — only `content_hash`, so accidentally committing `.coherence/state.db` doesn't disclose file content. Auto-gitignored.
 
-### What's NOT in v0.1 (transparent scope)
+### What's NOT in v0.1.1 (transparent scope)
 
 - Native Windows (use WSL2; v0.2 ships `os.O_EXCL` fallback)
-- Strict mode (`permissionDecision: "deny"` blocks the tool call) — empirical retry-loop hazard on v2.1.131 forced deferral to v0.2
+- Strict mode (`permissionDecision: "deny"` blocks the tool call) — empirical retry-loop hazard on v2.1.131 forced deferral to v0.2. v0.2 design combines `permissions.deny` (terminal — model cannot route around) + multi-tool runtime hooks for advisory warnings.
 - `claude agents` subcommand on v2.1.131 — the subcommand is a management UI, not a session spawner; out of scope
 - Cross-host / cross-vendor coordination (hosted MCP roadmap, not this plugin)
+- Multiple developers on the same workstation — v0.1.1 trust boundary is single-user single-host
 
 ### Install
 
