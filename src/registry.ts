@@ -62,27 +62,28 @@ export interface Artifact {
   readonly updated_at: number;
 }
 
-/** Internal SQLite row shape. Converted to Artifact via rowToArtifact(). */
-interface ArtifactRow {
-  id: string;
-  name: string;
-  version: number;
-  content_hash: string;
-  size_tokens: number | null;
-  last_writer_id: string | null;
-  updated_at: number;
-}
+// ArtifactRow / rowToArtifact removed (ce-review maintainability finding):
+// the SQLite row shape and the Artifact interface were byte-identical;
+// the mapper was an identity function. We cast directly to `Artifact` at
+// the `.get()`/`.all()` call sites — the `readonly` modifiers on Artifact
+// are a TypeScript compile-time constraint that the cast satisfies.
 
-function rowToArtifact(row: ArtifactRow): Artifact {
-  return {
-    id: row.id,
-    name: row.name,
-    version: row.version,
-    content_hash: row.content_hash,
-    size_tokens: row.size_tokens,
-    last_writer_id: row.last_writer_id,
-    updated_at: row.updated_at,
-  };
+/**
+ * Narrow a raw SQLite `state` string to `MESIState`. Throws on unknown values
+ * (e.g., a Python transient state string like "ISG" surfacing through a
+ * shared state.db). ce-review kieran-typescript finding: replaces the bare
+ * `as MESIState` cast with an explicit guard.
+ */
+function toMESIState(s: string): MESIState {
+  switch (s) {
+    case MESIState.MODIFIED:
+    case MESIState.EXCLUSIVE:
+    case MESIState.SHARED:
+    case MESIState.INVALID:
+      return s;
+    default:
+      throw new Error(`registry: unknown MESI state from DB: ${s}`);
+  }
 }
 
 /**
@@ -107,6 +108,10 @@ export class ArtifactRegistry {
     this.db.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`);
     // foreign_keys = ON matches Python coordinator's _apply_v1_schema setup.
     this.db.pragma("foreign_keys = ON");
+    // synchronous = NORMAL matches Python coordinator's sqlite_registry.py:181 —
+    // WAL default is NORMAL but Python sets it explicitly; mirror for parity.
+    // ce-review safe_auto fix per data-migrations finding 4.
+    this.db.pragma("synchronous = NORMAL");
 
     const result = runPendingMigrations(this.db);
     this.stats = {
@@ -184,16 +189,16 @@ export class ArtifactRegistry {
   getArtifactById(id: string): Artifact | null {
     const row = this.db
       .prepare(`SELECT id, name, version, content_hash, size_tokens, last_writer_id, updated_at FROM artifacts WHERE id = ?`)
-      .get(id) as ArtifactRow | undefined;
-    return row === undefined ? null : rowToArtifact(row);
+      .get(id) as Artifact | undefined;
+    return row ?? null;
   }
 
   /** Return artifact metadata by name (parent-repo-relative path), or null. */
   getArtifactByName(name: string): Artifact | null {
     const row = this.db
       .prepare(`SELECT id, name, version, content_hash, size_tokens, last_writer_id, updated_at FROM artifacts WHERE name = ?`)
-      .get(name) as ArtifactRow | undefined;
-    return row === undefined ? null : rowToArtifact(row);
+      .get(name) as Artifact | undefined;
+    return row ?? null;
   }
 
   /** Cheap existence check; cheaper than getArtifactById when only presence matters. */
@@ -210,10 +215,9 @@ export class ArtifactRegistry {
 
   /** Return all known artifacts. Order is unspecified. */
   listArtifacts(): Artifact[] {
-    const rows = this.db
+    return this.db
       .prepare(`SELECT id, name, version, content_hash, size_tokens, last_writer_id, updated_at FROM artifacts`)
-      .all() as ArtifactRow[];
-    return rows.map(rowToArtifact);
+      .all() as Artifact[];
   }
 
   // ------------------------------------------------------------------
@@ -230,7 +234,7 @@ export class ArtifactRegistry {
       .all(artifactId) as { agent_id: string; state: string }[];
     const map = new Map<string, MESIState>();
     for (const r of rows) {
-      map.set(r.agent_id, r.state as MESIState);
+      map.set(r.agent_id, toMESIState(r.state));
     }
     return map;
   }
@@ -240,7 +244,7 @@ export class ArtifactRegistry {
     const row = this.db
       .prepare(`SELECT state FROM agent_states WHERE artifact_id = ? AND agent_id = ?`)
       .get(artifactId, agentId) as { state: string } | undefined;
-    return row === undefined ? null : (row.state as MESIState);
+    return row === undefined ? null : toMESIState(row.state);
   }
 
   /**
@@ -347,7 +351,7 @@ export class ArtifactRegistry {
         .prepare(
           `SELECT id, name, version, content_hash, size_tokens, last_writer_id, updated_at FROM artifacts WHERE id = ?`,
         )
-        .get(artifactId) as ArtifactRow | undefined;
+        .get(artifactId) as Artifact | undefined;
       if (artifactRow === undefined) {
         throw new Error(`commit: artifact ${artifactId} not registered`);
       }
@@ -407,10 +411,10 @@ export class ArtifactRegistry {
         .prepare(
           `SELECT id, name, version, content_hash, size_tokens, last_writer_id, updated_at FROM artifacts WHERE id = ?`,
         )
-        .get(artifactId) as ArtifactRow;
+        .get(artifactId) as Artifact;
 
       this.db.exec("COMMIT");
-      return { artifact: rowToArtifact(updatedRow), invalidatedPeers };
+      return { artifact: updatedRow, invalidatedPeers };
     } catch (err) {
       try {
         this.db.exec("ROLLBACK");

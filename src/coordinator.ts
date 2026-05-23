@@ -19,7 +19,7 @@
  *   - /status three-tier (KTD-K)
  *   - hook handler routes (Unit 3)
  */
-import { mkdirSync, writeFileSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { hostname } from "node:os";
 import { ensureSecret } from "./auth.js";
@@ -28,7 +28,10 @@ import { ArtifactRegistry } from "./registry.js";
 import { TrackedArtifactPolicy } from "./policy.js";
 import { SessionRegistry } from "./sessions.js";
 
-const VERSION = "0.1.1-alpha.1";
+// Kept in sync manually with package.json/.claude-plugin/{plugin,marketplace}.json.
+// TODO(ce-review safe_auto follow-up): import from package.json via resolveJsonModule
+// once tsconfig is updated so check_versions_synced.js can guard a single source of truth.
+const VERSION = "0.1.1";
 
 interface Workspace {
   root: string;
@@ -77,6 +80,16 @@ async function main(): Promise<void> {
   const workspace = resolveWorkspace();
 
   mkdirSync(workspace.coherenceDir, { recursive: true, mode: 0o700 });
+  // KTD-13 + README "auto-gitignored" claim: write .coherence/.gitignore
+  // containing `*` so a careless `git add .` doesn't accidentally commit
+  // state.db (MESI state + agent UUIDs), hook.secret (a credential), or
+  // server.pid. Mirrors lifecycle._ensure_coherence_dir in the library's
+  // Python coordinator. Idempotent — only write if missing so operator
+  // customizations are never clobbered.
+  const gitignorePath = join(workspace.coherenceDir, ".gitignore");
+  if (!existsSync(gitignorePath)) {
+    writeFileSync(gitignorePath, "*\n", { mode: 0o600 });
+  }
   const secret = ensureSecret(workspace.coherenceDir);
 
   // Open the SQLite registry. Unit 1 ships with an empty MIGRATIONS list so
@@ -112,14 +125,28 @@ async function main(): Promise<void> {
   // Bind to ephemeral port on loopback. Per KTD-A.5 + Open Questions:
   // BIND_HOST = "127.0.0.1" is a code-level invariant; no operator override.
   server.listen(0, BIND_HOST, () => {
+    // ce-review correctness fix: the previous version threw from inside this
+    // callback. The throw becomes an uncaughtException at event-loop turn,
+    // produces a noisy stack trace, and leaves no pid file behind for the
+    // SessionStart hook to interrogate. Log + clean exit instead.
     const address = server.address();
     if (address === null || typeof address === "string") {
-      throw new Error(`unexpected server address shape: ${String(address)}`);
+      process.stderr.write(
+        `agent-coherence-coordinator: fatal: unexpected server address shape: ${String(address)}\n`,
+      );
+      process.exit(1);
     }
     const port = address.port;
 
-    writePidFile(workspace.pidFile, process.pid, port, "node");
-    writePortFile(workspace.portFile, port);
+    try {
+      writePidFile(workspace.pidFile, process.pid, port, "node");
+      writePortFile(workspace.portFile, port);
+    } catch (err) {
+      process.stderr.write(
+        `agent-coherence-coordinator: fatal: failed to write pid/port file: ${String(err)}\n`,
+      );
+      process.exit(1);
+    }
 
     logInfo(`spawned at ${BIND_HOST}:${port} (pid=${process.pid}, host=${hostname()})`);
     logInfo(`workspace=${workspace.root}; pid_file=${workspace.pidFile}`);

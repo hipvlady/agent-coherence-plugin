@@ -23,6 +23,7 @@ import { verifyBearer, verifyHost } from "./auth.js";
 import type { ArtifactRegistry } from "./registry.js";
 import type { TrackedArtifactPolicy, PolicySummary } from "./policy.js";
 import type { SessionRegistry } from "./sessions.js";
+import { writeJson, writeError } from "./hooks/_common.js";
 import { preReadRoute } from "./hooks/pre_read.js";
 import { preEditRoute } from "./hooks/pre_edit.js";
 import { postEditRoute } from "./hooks/post_edit.js";
@@ -47,21 +48,6 @@ export interface ServerOptions {
   policy: TrackedArtifactPolicy;
   /** In-memory session_id ↔ agent_id map for hook handlers. */
   sessions: SessionRegistry;
-}
-
-interface ErrorEnvelope {
-  error: string;
-}
-
-function writeJson(res: ServerResponse, status: number, body: unknown): void {
-  res.statusCode = status;
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.end(JSON.stringify(body));
-}
-
-function writeError(res: ServerResponse, status: number, message: string): void {
-  const envelope: ErrorEnvelope = { error: message };
-  writeJson(res, status, envelope);
 }
 
 /**
@@ -143,8 +129,16 @@ interface StatusDefaultBody {
   version: string;
   coordinator_uptime_seconds: number;
   schema_version: number;
-  tracked_artifacts: ReadonlyArray<{ id: string; name: string; version: number }>;
-  sessions: ReadonlyArray<{ agent_id: string }>;
+  // AC-03 (cross-backend parity): tracked_artifacts entries use `path`,
+  // sessions entries carry `agent_name` + `states` (per-artifact MESI
+  // map). Mirrors Python's `_handle_status` shape so dashboards and
+  // CLIs work identically across backends.
+  tracked_artifacts: ReadonlyArray<{ id: string; path: string; version: number }>;
+  sessions: ReadonlyArray<{
+    agent_id: string;
+    agent_name: string;
+    states: Record<string, string>;
+  }>;
   counts: {
     tracked_artifacts: number;
     sessions: number;
@@ -199,13 +193,37 @@ function handleStatus(req: IncomingMessage, res: ServerResponse, options: Server
   // domain methods. agent_id is the UUID5 of the session_id, with no
   // `claude-session-` prefix (the prefix only appears in the hook layer's
   // agent_name field; the stored agent_id is already a bare UUID5 per KTD-K).
-  const artifacts = options.registry.listArtifacts().map((a) => ({
+  //
+  // AC-03 (cross-backend parity): tracked_artifacts uses `path` (not
+  // `name`) to match Python's wire shape. Sessions include agent_name +
+  // per-artifact MESI states so agent-coherence-status renders the same
+  // table against either backend.
+  const artifactList = options.registry.listArtifacts();
+  const artifacts = artifactList.map((a) => ({
     id: a.id,
-    name: a.name, // Already repo-relative per the resolveOrRegister contract
+    path: a.name, // Already repo-relative per the resolveOrRegister contract
     version: a.version,
   }));
   const activeAgents = options.registry.listActiveAgents();
-  const sessions = activeAgents.map((agentId) => ({ agent_id: agentId }));
+  const sessions = activeAgents.map((agentId) => {
+    const states: Record<string, string> = {};
+    for (const art of artifactList) {
+      const state = options.registry.getAgentState(art.id, agentId);
+      // Only non-INVALID states appear in the per-agent map (Python parity).
+      if (state !== null && state !== "INVALID") {
+        states[art.name] = state;
+      }
+    }
+    // agent_name falls back to "<unknown>" if the SessionRegistry has not
+    // seen this agent_id (e.g., the agent surfaced via a peer
+    // invalidation but never called register_session itself yet).
+    const agentName = options.sessions.agentIdToName(agentId) ?? "<unknown>";
+    return {
+      agent_id: agentId,
+      agent_name: agentName,
+      states,
+    };
+  });
 
   const body: StatusDefaultBody = {
     status: "ok",
