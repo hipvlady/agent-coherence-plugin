@@ -8,9 +8,9 @@ The canonical release-notes surface is [GitHub Releases](https://github.com/hipv
 
 ## [Unreleased]
 
-Unreleased work targets `v0.2.0` — the broad-beta launch of strict mode.
+No unreleased work yet — `v0.2.0` (broad-beta launch) shipped on 2026-05-24.
 
-## [0.2.0] — TBD (broad-beta launch)
+## [0.2.0] — 2026-05-24 (broad-beta launch)
 
 **Broad-beta milestone.** The 2026-05-23 plan deepening flipped the v0.1.1 G12 alpha-cohort gating to "open broad beta with explicit risk acceptance" — v0.1.1 has been publicly installable from the marketplace catalog and no cohort blockers have surfaced via the catalog smoke installs. v0.2 ships strict mode atop that baseline.
 
