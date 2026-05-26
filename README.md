@@ -240,6 +240,31 @@ pytest -m protocol_corpus
 | `hook.secret` compromised | Same-user attack or accidental leak | Stop all sessions, `rm -rf .coherence/`, restart Claude Code. v0.2.x will support hot rotation without restart. |
 | *(v0.2 strict mode)* agent keeps retrying after strict deny | Expected. The model exits the retry loop after 2-5 attempts per Phase 0 finding. | No action — the deny IS the signal. The operator sees the deny in the transcript and can decide how to proceed. |
 | *(v0.2 strict mode)* `agent-coherence-migrate-deny` exits with "NOT a descendant" | Symlink-containment check refused: the CLAUDE.md / AGENTS.md canonical path escapes the workspace root | Verify with `realpath CLAUDE.md`. If the symlink is intentional and points inside the workspace, the canonical-path check still rejects — the helper is intentionally strict. Use `agent-coherence-migrate-rules` for the looser flow. |
+| Bash permission prompt fires every time a plugin slash command runs (e.g., `/agent-coherence:status`) | Claude Code does not currently allow plugins to ship a default `permissions.allow` for their own bundled binaries — only `agent` and `subagentStatusLine` keys are supported in plugin-root `settings.json` per the [plugins-reference](https://code.claude.com/docs/en/plugins-reference). Tracked upstream. | Add the allowlist to your workspace `.claude/settings.local.json` once per workspace — see § Allowlisting the plugin's bundled binaries below. |
+
+### Allowlisting the plugin's bundled binaries
+
+The plugin ships five console scripts (`agent-coherence-status`, `agent-coherence-track`, `agent-coherence-untrack`, `agent-coherence-coordinator`, `agent-coherence-migrate-deny`). Claude Code's per-command permission gate fires on each one unless they're in your workspace's `permissions.allow`. To suppress the prompts, append this block to your `.claude/settings.local.json` (workspace-local, per-user, gitignored by default):
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(agent-coherence-status:*)",
+      "Bash(agent-coherence-track:*)",
+      "Bash(agent-coherence-untrack:*)",
+      "Bash(agent-coherence-coordinator:*)",
+      "Bash(agent-coherence-migrate-deny:*)"
+    ]
+  }
+}
+```
+
+If your `.claude/settings.local.json` already exists, merge the `permissions.allow` array with whatever's already there. Re-running a plugin slash command after this edit should execute without a prompt.
+
+If your team wants the same allowlist committed for everyone, put the block in `.claude/settings.json` (workspace-shared, version-controlled) instead. Same shape, different file.
+
+The plugin-shipped path requires a Claude Code platform change — tracked in [anthropics/claude-code#62616](https://github.com/anthropics/claude-code/issues/62616) (filed 2026-05-26 per the Phase E broad-beta monitoring window).
 
 ## v0.2 known limitations
 
