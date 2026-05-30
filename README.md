@@ -310,7 +310,7 @@ Not in v0.2. The plugin's hook surface is Claude-Code-specific. Multi-target sup
 
 Two steps:
 
-1. **Rotate the `hook.secret`.** v0.1.1 secrets were generated under the warn-mode threat model; v0.2's strict-mode hard guardrails warrant a fresh secret. Procedure: stop any running `claude` sessions in your workspace → `rm <repo>/.coherence/hook.secret` → restart any `claude` session, which lazy-spawns the coordinator and generates a fresh secret. Documented as **mandatory** in [docs/RELEASE.md](docs/RELEASE.md).
+1. **Rotate the `hook.secret`.** v0.1.1 secrets were generated under the warn-mode threat model; v0.2's strict-mode hard guardrails warrant a fresh secret. Procedure: stop any running `claude` sessions in your workspace → `rm <repo>/.coherence/hook.secret` → restart any `claude` session, which lazy-spawns the coordinator and generates a fresh secret.
 2. **Bump the plugin install.** `/plugin install agent-coherence@agent-coherence` re-resolves the latest published tag from the marketplace catalog.
 
 Strict mode is opt-in — your existing workspaces stay warn-only until you add patterns to `.coherence/strict_mode.yaml`.
@@ -340,9 +340,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the pre-PR checklist + branching conv
 
 ## Release
 
-Per-release procedure is documented in [docs/RELEASE.md](docs/RELEASE.md) (operator runbook — pre-flight setup, version bump, tag push, hot-fix path). Releases follow [SemVer 2.0](https://semver.org/spec/v2.0.0.html); the canonical version-tag history is in [CHANGELOG.md](CHANGELOG.md).
-
-The broad-beta launch-readiness rubric (BB1-BB8 gates that must clear before each tag push) is in [docs/BROAD_BETA.md](docs/BROAD_BETA.md).
+Releases follow [SemVer 2.0](https://semver.org/spec/v2.0.0.html); the canonical version-tag history is in [CHANGELOG.md](CHANGELOG.md). See [GitHub Releases](https://github.com/hipvlady/agent-coherence-plugin/releases) for tagged artifacts.
 
 ## License
 
